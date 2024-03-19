@@ -1,6 +1,6 @@
-# UDP Transcoder
+# UDP Transcode
 
-UDPTranscoder is a lightweight application designed to facilitate the transmission 
+UDPTranscode is a lightweight application designed to facilitate the transmission 
 of User Datagram Protocol (UDP) packets across network boundaries restricted to 
 outgoing Transmission Control Protocol (TCP) connections. This functionality is 
 particularly applicable to multimedia conferencing applications, which often rely
@@ -9,7 +9,7 @@ on UDP for real-time data exchange.
 Imagine you're setting up a video call, but there's a  firewall in the way. 
 That firewall only lets outgoing regular traffic (TCP connections) through, 
 but your video call needs a different type of traffic (UDP packets) to function. 
-UDPTranscoder comes to the rescue!
+UDPTranscode comes to the rescue!
 
 This program acts like a tunnel, sending those UDP packets back and forth within 
 a standard TCP connection. So the firewall doesn't even know the difference, and 
@@ -36,11 +36,11 @@ where <samp>make install</samp> will put the installed binary.  Type
 
 
 <h2>Usage</h2>
-<p>UDPTranscoder can be run in two modes: a client mode and a server mode.  The
+<p>UDPTranscode can be run in two modes: a client mode and a server mode.  The
 client mode initiates the TCP connection before relaying UDP; the server
 waits for an incoming connection before doing so.  After the TCP connection
 is established, the behavior of the two modes is identical.  If you are
-using UDPTranscoder to traverse a firewall as discussed above, the client would
+using UDPTranscode to traverse a firewall as discussed above, the client would
 be run inside the firewall, and the server would be run outside it.</p>
 
 <h3>Options</h3>
@@ -68,13 +68,13 @@ work; the server will not begin relaying packets until both its connections
 have been established.</dd>
 <dt><samp>-v</samp></dt>
 <dd><b>Verbose output</b><br />
-<p>This flag turns on verbose debugging output about UDPTranscoder's actions.
+<p>This flag turns on verbose debugging output about UDPTranscode's actions.
 It may be given multiple times.  With a single <samp>-v</samp>,
-information about connection establishment is printed on UDPTranscoder's
+information about connection establishment is printed on UDPTranscode's
 standard error stream; with a second one, per-packet information is also
 shown.  Note that this latter case can produce a prodigious amount of
 information.</p>
-<p>If this flag is not given, UDPTranscoder will remain silent unless an
+<p>If this flag is not given, UDPTranscode will remain silent unless an
 error occurs.</p></dd>
 </dl>
 </blockquote>
@@ -83,7 +83,7 @@ error occurs.</p></dd>
 given; if not, it is an error.</p>
 
 <p>In all cases, the UDP address and port to tunnel is given after all
-options.  UDPTranscoder will listen to this adddress for packets, and will send
+options.  UDPTranscode will listen to this adddress for packets, and will send
 received packets on this address.  The address may be a multicast address;
 in this case, a multicast TTL should be specified, and tunneled packets will
 be sent with this TTL.  All addresses, TCP and UDP, may be specified either
@@ -98,7 +98,7 @@ format was proposed in early drafts of RTP for RTP-over-TCP, but was dropped
 from the final specification.</p>
 
 <h2>Known Bugs/Issues</h2>
-<p>UDPTranscoder does not check incoming UDP packets to verify that they are
+<p>UDPTranscode does not check incoming UDP packets to verify that they are
 indeed coming from the address which the user specified; it binds to
 INADDR_ANY, and accepts any UDP packet arriving on the specified port.  This
 could potentially allow denial-of-service or spoofing attacks.  If two or
@@ -106,21 +106,21 @@ more <samp>-v</samp> options are given, per-packet identification will be
 printed of each packet's source address as it is received, allowing such a
 situation to be diagnosed.</p>
 
-<p>For multicast, UDPTranscoder turns off packet loopback, as it has no way to
+<p>For multicast, UDPTranscode turns off packet loopback, as it has no way to
 distinguish its own packets it sent out from packets genuinely arriving on
 the multicast group.  This means that if you are tunneling traffic from or
-to a multicast group, both ends of UDPTranscoder must be run on different hosts
+to a multicast group, both ends of UDPTranscode must be run on different hosts
 than any member of the group.  (In general, the only way to distinguish
 looped packets from packets genuinely received from other applications on
 the local host is with application-layer labeling, as RTP does.)</p>
 
-<p>UDPTranscoder is designed to tunnel RTP-style traffic, in which applications
+<p>UDPTranscode is designed to tunnel RTP-style traffic, in which applications
 send and receive UDP packets to and from the same port (or pair of ports).
 It does not support request/response-style traffic, in which a client
 request is sent from a transient port X to a well-known port Y, and the
 server's response is returned from port Y to port X.</p>
 
-<p>UDPTranscoder deliberately ignores "Connection Refused" errors on the UDP
+<p>UDPTranscode deliberately ignores "Connection Refused" errors on the UDP
 port, clearing the socket error state, so that a tunnel may be set up before
 conferencing tools are started on both ends.  This may mean that a mis-typed
 UDP address or port is not recognized, as no error is printed.  If two or
@@ -128,7 +128,7 @@ more <samp>-v</samp> options are given, a diagnostic will be printed
 whenever the error state is cleared from the socket.</p>
 
 <p>Once one endpoint of a tunnel is taken down, closing the socket, the
-other one exits as well; to re-establish the tunnel, UDPTranscoder must be
+other one exits as well; to re-establish the tunnel, UDPTranscode must be
 restarted on both sides.</p>
 
 <p>IP version 6 is not supported.</p>
