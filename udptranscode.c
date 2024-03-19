@@ -646,3 +646,68 @@ static int tcp_to_udp(struct relay *relay)
 
   return 0;
 } /* tcp_to_udp */
+
+
+/* main */
+int main(int argc, char *argv[])
+{
+  struct relay *relays; // Array of relay structures to manage UDP-TCP conversion
+  int relay_count, is_server; // Number of relays and server/client mode indicator
+  int i; // Loop counter
+  fd_set readfds; // File descriptor set for select() monitoring
+  int max = 0; // Maximum file descriptor value for select()
+  int ok; // Flag indicating if data forwarding operations are successful
+
+  // Parse command-line arguments and initialize relays
+  parse_args(argc, argv, &relays, &relay_count, &is_server);
+
+  // Set up relay connections
+  for (i = 0; i < relay_count; i++) {
+    if (is_server) {
+      setup_server_listen(&relays[i]);
+    }
+    else {
+      setup_tcp_client(&relays[i]);
+    }
+    setup_udp_recv(&relays[i]);
+    setup_udp_send(&relays[i]);
+  }
+
+  // If in server mode, wait for incoming TCP connections
+  if (is_server) {
+    await_incoming_connections(relays, relay_count);
+  }
+
+  // Main loop for data forwarding between UDP and TCP ports
+  do {
+    FD_ZERO(&readfds); // Clear file descriptor set
+    for (i = 0; i < relay_count; i++) {
+      // Add TCP and UDP sockets to the file descriptor set
+      FD_SET(relays[i].tcp_sock, &readfds);
+      SET_MAX(relays[i].tcp_sock);
+      FD_SET(relays[i].udp_recv_sock, &readfds);
+      SET_MAX(relays[i].udp_recv_sock);
+    }
+
+    // Monitor file descriptors for readability
+    if (select(max, &readfds, NULL, NULL, NULL) < 0) {
+      if (errno != EINTR) {
+        perror("main loop: select");
+        exit(1);
+      }
+    }
+
+    ok = 0; // Initialize success flag
+    for (i = 0; i < relay_count; i++) {
+      // Forward TCP data to UDP and vice versa
+      if (FD_ISSET(relays[i].tcp_sock, &readfds)) {
+        ok += tcp_to_udp(&relays[i]);
+      }
+      if (FD_ISSET(relays[i].udp_recv_sock, &readfds)) {
+        ok += udp_to_tcp(&relays[i]);
+      }
+    }
+  } while (ok == 0); // Continue loop until there's an error in data forwarding
+
+  exit(0); // Exit the program with success status
+} /* main */
