@@ -255,3 +255,77 @@ static void parse_args(int argc, char *argv[], struct relay **relays,
     (*relays)[i].tcpaddr.sin_family = AF_INET;
   }
 }
+
+/*
+ * Function: setup_udp_recv
+ * ------------------------
+ * Set up the UDP receiving socket for the specified relay.
+ * Exit the program if any error occurs during setup.
+ *
+ * relay: Pointer to the relay structure containing UDP setup information
+ */
+static void setup_udp_recv(struct relay *relay)
+{
+  int opt;
+  struct sockaddr_in udp_recv_addr;
+
+  // Create UDP receiving socket
+  if ((relay->udp_recv_sock = socket(PF_INET, SOCK_DGRAM, 0)) < 0) {
+    perror("setup_udp_recv: socket");
+    exit(1);
+  }
+
+  // Set "reuseaddr" option for the socket
+  opt = 1;
+  if (setsockopt(relay->udp_recv_sock, SOL_SOCKET, SO_REUSEADDR,
+                 (void *)&opt, sizeof(opt)) < 0) {
+    perror("setup_udp_recv: setsockopt(SO_REUSEADDR)");
+    exit(1);
+  }
+
+  // Set "reuseport" option if available
+#ifdef SO_REUSEPORT
+  opt = 1;
+  if (setsockopt(relay->udp_recv_sock, SOL_SOCKET, SO_REUSEPORT,
+                 (void *)&opt, sizeof(opt)) < 0) {
+    perror("setup_udp_recv: setsockopt(SO_REUSEPORT)");
+    exit(1);
+  }
+#endif
+
+  // Set up multicast group membership if multicast UDP is enabled
+  if (relay->multicast_udp) {
+#ifdef IP_ADD_MEMBERSHIP
+    struct ip_mreq mreq;  // Multicast group membership structure
+
+    mreq.imr_multiaddr = relay->udpaddr.sin_addr;
+    mreq.imr_interface.s_addr = INADDR_ANY;
+
+    if (setsockopt(relay->udp_recv_sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                   (void *)&mreq, sizeof(mreq)) < 0) {
+      perror("setup_udp_recv: setsockopt(IP_ADD_MEMBERSHIP)");
+      exit(1);
+    }
+#else
+    fprintf(stderr, "Multicast addresses not supported\n");
+    exit(1);
+#endif
+  }
+
+  // Copy UDP address information and bind the socket
+  memcpy(&udp_recv_addr, &(relay->udpaddr), sizeof(struct sockaddr_in));
+  
+  // Adjust the UDP address if multicast UDP is disabled
+  if (!(relay->multicast_udp)) {
+    udp_recv_addr.sin_addr.s_addr = INADDR_ANY;
+  }
+
+  // Bind the socket to the UDP address
+  if (bind(relay->udp_recv_sock, (struct sockaddr *)&udp_recv_addr,
+           sizeof(udp_recv_addr)) < 0) {
+    perror("setup_udp_recv: bind");
+    exit(1);
+  }
+
+  return;
+} /* setup_udp_recv */
