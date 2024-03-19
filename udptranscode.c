@@ -522,3 +522,127 @@ static void setup_tcp_client(struct relay *relay)
                      inet_ntoa(relay->tcpaddr.sin_addr),
                      ntohs(relay->tcpaddr.sin_port));
 } /* setup_tcp_client */
+
+
+/*
+ * Function: udp_to_tcp
+ * ---------------------
+ * Forward a UDP packet received on the relay's UDP port to the TCP port.
+ * If an error occurs during transmission or reception, return non-zero.
+ *
+ * relay: Pointer to the relay structure containing UDP and TCP socket information
+ */
+static int udp_to_tcp(struct relay *relay)
+{
+  struct out_packet p;
+  int buflen;
+  struct sockaddr_in remote_udpaddr;
+  int addrlen = sizeof(remote_udpaddr);
+
+  // Receive UDP packet
+  if ((buflen = recvfrom(relay->udp_recv_sock, p.buf, UDPBUFFERSIZE, 0,
+                         (struct sockaddr *) &remote_udpaddr,
+                         &addrlen)) <= 0) {
+    if (buflen < 0) {
+      perror("udp_to_tcp: recv");
+    }
+    return 1;
+  }
+
+  // Log debug information if enabled
+  if (debug > 1) {
+    fprintf(stderr, "Received %d byte UDP packet from %s/%hu\n", buflen,
+            inet_ntoa(remote_udpaddr.sin_addr),
+            ntohs(remote_udpaddr.sin_port));
+  }
+
+  // Prepare packet length and send it to TCP port
+  p.length = htons(buflen);
+  if (send(relay->tcp_sock, (void *) &p, buflen+sizeof(p.length), 0) < 0) {
+    perror("udp_to_tcp: send");
+    return 1;
+  }
+
+  return 0;
+} /* udp_to_tcp */
+
+
+/*
+ * Function: tcp_to_udp
+ * ---------------------
+ * Read data from the relay's TCP socket and send complete packets to the UDP port.
+ * If an error occurs during transmission or reception, return non-zero.
+ *
+ * relay: Pointer to the relay structure containing UDP and TCP socket information
+ */
+static int tcp_to_udp(struct relay *relay)
+{
+  int read_len;
+
+  // Initialize relay's state if uninitialized
+  if (relay->state == uninitialized) {
+    relay->state = reading_length;
+    relay->buf_ptr = relay->buf;
+    relay->packet_start = relay->buf;
+    relay->packet_length = 0;
+  }
+
+  // Read data from TCP socket
+  if ((read_len = read(relay->tcp_sock, relay->buf_ptr,
+                       (relay->buf + TCPBUFFERSIZE - relay->buf_ptr))) <= 0) {
+    if (read_len < 0) {
+      perror("tcp_to_udp: read");
+    }
+    return 1;
+  }
+    
+  relay->buf_ptr += read_len;
+
+  // Process received data
+  if (relay->state == reading_length) {
+    if (relay->buf_ptr - relay->packet_start < sizeof(u_int16)) {
+      return 0;
+    }
+    relay->packet_length = ntohs(*(u_int16 *)relay->packet_start);
+    relay->packet_start += sizeof(u_int16);
+    relay->state = reading_packet;
+  }
+  if (relay->buf_ptr - relay->packet_start < relay->packet_length) {
+    return 0;
+  }
+
+  // Send complete UDP packet
+  if (debug > 1) {
+    fprintf(stderr, "Received packet on TCP, length %u; sending as UDP\n",
+            relay->packet_length);
+  }
+  if (send(relay->udp_send_sock, relay->packet_start,
+           relay->packet_length, 0) < 0) {
+    if (errno != ECONNREFUSED) {
+      perror("tcp_to_udp: send");
+      return 1;
+    }
+    else {
+      // Handle connection refusal gracefully
+      int err, len = sizeof(err);
+
+      if (debug > 1) {
+        fprintf(stderr, "ECONNREFUSED on udp_send_sock; clearing.\n");
+      }
+      if (getsockopt(relay->udp_send_sock, SOL_SOCKET, SO_ERROR,
+                     (void *)&err, &len) < 0) {
+        perror("tcp_to_udp: getsockopt(SO_ERROR)");
+        return 1;
+      }
+    }
+  }
+
+  // Adjust buffer pointers and relay state
+  memmove(relay->buf, relay->packet_start + relay->packet_length,
+          relay->buf_ptr - (relay->packet_start + relay->packet_length));
+  relay->buf_ptr -= relay->packet_length + (relay->packet_start - relay->buf);
+  relay->packet_start = relay->buf;
+  relay->state = reading_length;
+
+  return 0;
+} /* tcp_to_udp */
