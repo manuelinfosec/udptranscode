@@ -329,3 +329,196 @@ static void setup_udp_recv(struct relay *relay)
 
   return;
 } /* setup_udp_recv */
+
+/*
+ * Function: setup_udp_send
+ * -------------------------
+ * Set up the UDP sending socket for the specified relay.
+ * Exit the program if any error occurs during setup.
+ *
+ * relay: Pointer to the relay structure containing UDP setup information
+ */
+static void setup_udp_send(struct relay *relay)
+{
+  // Create UDP socket
+  if ((relay->udp_send_sock = socket(PF_INET, SOCK_DGRAM, 0)) < 0) {
+    perror("setup_udp_send: socket");
+    exit(1);
+  }
+
+  // Connect UDP socket to specified address
+  if (connect(relay->udp_send_sock, (struct sockaddr *) &(relay->udpaddr),
+              sizeof(relay->udpaddr)) < 0) { 
+    perror("setup_udp_send: connect");
+    exit(1);
+  }
+
+  // Configure multicast options if applicable
+  if (IN_MULTICAST(htonl(relay->udpaddr.sin_addr.s_addr))) {
+#ifdef IP_MULTICAST_LOOP
+    u_int8 loop = 0;
+
+    if (setsockopt(relay->udp_send_sock, IPPROTO_IP, IP_MULTICAST_LOOP,
+                   (void *)&loop, sizeof(loop)) < 0) {
+      perror("setup_udp_send: setsockopt(IP_MULTICAST_LOOP)");
+      exit(1);
+    }
+#endif
+
+#ifdef IP_MULTICAST_TTL
+    if (setsockopt(relay->udp_send_sock, IPPROTO_IP, IP_MULTICAST_TTL,
+                   (void *)&(relay->udp_ttl), sizeof(relay->udp_ttl)) < 0) {
+      perror("setup_udp_send: setsockopt(IP_MULTICAST_TTL)");
+      exit(1);
+    }
+#endif
+  }
+} /* setup_udp_send */
+
+
+/*
+ * Function: setup_server_listen
+ * -----------------------------
+ * Set up a TCP listening socket, and wait for an incoming connection to
+ * it. Fill in the socket in the relay structure.
+ * Exit the program if any error occurs during setup.
+ *
+ * relay: Pointer to the relay structure containing TCP setup information
+ */
+static void setup_server_listen(struct relay *relay)
+{
+  int opt;
+
+  // Create TCP listening socket
+  if ((relay->tcp_listen_sock = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
+    perror("setup_server_listen: socket");
+    exit(1);
+  }
+    
+  // Set "reuseaddr" option for the socket
+  opt = 1;
+  if (setsockopt(relay->tcp_listen_sock, SOL_SOCKET, SO_REUSEADDR,
+                 (void *)&opt, sizeof(opt)) < 0) {
+    perror("setup_server_listen: setsockopt(SO_REUSEADDR)");
+    exit(1);
+  }
+  
+#ifdef SO_REUSEPORT
+  opt = 1;
+  if (setsockopt(relay->tcp_listen_sock, SOL_SOCKET, SO_REUSEPORT,
+                 (void *)&opt, sizeof(opt)) < 0) { 
+    perror("setup_server_listen: setsockopt(SO_REUSEPORT)");
+    exit(1);
+  }
+#endif
+
+  // Bind TCP listening socket
+  if (bind(relay->tcp_listen_sock, (struct sockaddr *)&(relay->tcpaddr),
+           sizeof(relay->tcpaddr)) < 0) {
+    perror("setup_server_listen: bind");
+    exit(1);
+  }
+    
+  // Listen for incoming connections
+  if (listen(relay->tcp_listen_sock, 1) < 0) {
+    perror("setup_server_listen: listen");
+    exit(1);
+  }
+
+  // Initialize relay's TCP socket
+  relay->tcp_sock = -1;
+
+  if (debug) fprintf(stderr, "Listening for TCP connections on port %hu\n",
+                     ntohs(relay->tcpaddr.sin_port));
+} /* setup_server_listen */
+
+
+/*
+ * Function: await_incoming_connections
+ * -------------------------------------
+ * Wait for connections to be established to all the TCP listeners.
+ * Fill in the tcp_sock element of each relay.
+ * Exit the program if any error occurs during setup.
+ *
+ * relays: Array of relay structures
+ * relay_count: Number of relays
+ */
+static void await_incoming_connections(struct relay *relays, int relay_count) 
+{
+  int i;
+  fd_set readfds;
+  int max = 0;
+  int all_connected;
+
+  do {
+    FD_ZERO(&readfds);
+    all_connected = 1;
+    for (i = 0; i < relay_count; i++) {
+      if (relays[i].tcp_sock == -1) {
+        // Only count relays we haven't had connections on yet
+        all_connected = 0;
+        FD_SET(relays[i].tcp_listen_sock, &readfds);
+        SET_MAX(relays[i].tcp_listen_sock);
+      }
+    }
+    
+    if (all_connected) break;
+    
+    if (select(max, &readfds, NULL, NULL, NULL) < 0) {
+      if (errno != EINTR) {
+        perror("await_incoming_connection: select");
+        exit(1);
+      }
+    }
+    
+    for (i = 0; i < relay_count; i++) {
+      if (FD_ISSET(relays[i].tcp_listen_sock, &readfds)) {
+        struct sockaddr_in client_addr;
+        int addrlen = sizeof(client_addr);
+        
+        if ((relays[i].tcp_sock =
+             accept(relays[i].tcp_listen_sock,
+                    (struct sockaddr *) &client_addr, &addrlen)) < 0) {
+          perror("await_incoming_connections: accept");
+          exit(1);
+        }
+        
+        if (debug) {
+          fprintf(stderr, "TCP connection from %s/%hu\n",
+                  inet_ntoa(client_addr.sin_addr),
+                  ntohs(client_addr.sin_port));
+        }
+      }
+    }
+  } while (!all_connected);
+} /* await_incoming_connections */
+
+
+/*
+ * Function: setup_tcp_client
+ * ---------------------------
+ * Connect the given relay to the desired address.
+ * Fill in the tcp_sock element of the relay structure.
+ * Exit the program if any error occurs during setup.
+ *
+ * relay: Pointer to the relay structure containing TCP setup information
+ */
+static void setup_tcp_client(struct relay *relay)
+{
+  // Create TCP socket
+  if ((relay->tcp_sock = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
+    perror("setup_tcp_client: socket");
+    exit(1);
+  }
+
+  // Connect TCP socket to specified address
+  if (connect(relay->tcp_sock, (struct sockaddr *) &(relay->tcpaddr),
+              sizeof(relay->tcpaddr)) < 0) {
+    perror("setup_tcp_client: connect");
+    exit(1);
+  }
+
+  if (debug) fprintf(stderr, "Connected TCP to %s/%hu\n",
+                     inet_ntoa(relay->tcpaddr.sin_addr),
+                     ntohs(relay->tcpaddr.sin_port));
+} /* setup_tcp_client */
