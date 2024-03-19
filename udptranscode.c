@@ -663,13 +663,17 @@ int main(int argc, char *argv[])
 
   // Set up relay connections
   for (i = 0; i < relay_count; i++) {
+    // If the program is running in server mode, set up a TCP listening socket
+    // for incoming connections; otherwise, connect to a remote TCP server.
     if (is_server) {
       setup_server_listen(&relays[i]);
     }
     else {
       setup_tcp_client(&relays[i]);
     }
+    // Set up a UDP receiving socket for the relay to receive UDP packets.
     setup_udp_recv(&relays[i]);
+    // Set up a UDP sending socket for the relay to send UDP packets.
     setup_udp_send(&relays[i]);
   }
 
